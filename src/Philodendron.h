@@ -17,6 +17,11 @@
 
 // #include "Filter.hpp"
 #include "RingBuffer.hpp"
+
+#ifdef METAMODULE
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace noi {
 
 class ExchangeBuffer{

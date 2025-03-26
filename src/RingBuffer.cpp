@@ -154,6 +154,9 @@ float StereoRingBuffer::interpolate(){
       return linearInterpolation();
       break;
   }
+  #ifdef METAMODULE
+  return noInterpolation();
+  #endif
 }
 
 /// @brief Triggered at each sample, update the step size and the m_actual_size
