@@ -77,6 +77,11 @@ struct Hellebore : Module {
 		configOutput(TEST_OUTPUT, "TEST");
 	}
 
+	~Hellebore() {
+		// Clean up any resources
+		moorer.~StereoMoorer(); // Explicitly call destructor
+		SlewLPF.~LPF(); // Explicitly call destructor
+	}
 
 	void process(const ProcessArgs& args) override {
 		// freeze
