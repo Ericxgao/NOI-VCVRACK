@@ -44,9 +44,21 @@ struct Hellebore : Module {
 	noi::Reverb::StereoMoorer moorer;
 	std::array<float, 2> signal_outputs = {0, 0};
 	std::array<float, 2> signal_inputs = {0, 0};
+	
+	// Cache frequently accessed param values
+	bool prev_freeze = false;
+	float prev_size = 0.f;
+	float prev_variation = 0.f;
+	float prev_time = 0.f;
+	float prev_drywet = 1.f;
+	
+	// Parameter change detection
+	bool params_changed = true;
+	int processCounter = 0;
+	static constexpr int PARAM_UPDATE_INTERVAL = 8; // Update params every 8 samples
 
 	void onSampleRateChange(const SampleRateChangeEvent & e) override{
-	moorer.SetSampleRate(e.sampleRate);
+		moorer.SetSampleRate(e.sampleRate);
 	}
 
 	Hellebore()
@@ -75,53 +87,121 @@ struct Hellebore : Module {
 		configOutput(L_OUTPUT, "Left");
 		configOutput(R_OUTPUT, "Right");
 		configOutput(TEST_OUTPUT, "TEST");
+		
+		// Initialize previous values
+		prev_size = params[SIZE_PARAM].getValue();
+		prev_variation = params[VARIATION_PARAM].getValue();
+		prev_time = params[TIME_PARAM].getValue();
+		prev_drywet = params[DRYWET_PARAM].getValue();
 	}
 
 	~Hellebore() {
-		// Clean up any resources
-		moorer.~StereoMoorer(); // Explicitly call destructor
-		SlewLPF.~LPF(); // Explicitly call destructor
+		// No need for explicit destructor calls - will be automatically called
 	}
 
 	void process(const ProcessArgs& args) override {
-		// freeze
-		m_params.freeze = (params[FREEZE_PARAM].getValue() > 0);
-		if (inputs[FREEZE_CV_INPUT].isConnected()){
-		m_params.freeze = (inputs[FREEZE_CV_INPUT].getVoltage()>0);
+		// Only update parameters periodically to reduce CPU usage
+		processCounter++;
+		if (processCounter >= PARAM_UPDATE_INTERVAL) {
+			processCounter = 0;
+			updateParams();
 		}
-		//buffer size
-		float combTime_cv = inputs[SIZE_CV_INPUT].getVoltage()*params[SIZE_CV_PARAM].getValue()*10.f;
-		combTime_cv = SlewLPF.process(combTime_cv);
-		float comb_feedback_time = 0.3 * pow(3.f, params[SIZE_PARAM].getValue()) - 0.3;
-		comb_feedback_time += combTime_cv;
-		m_params.comb_time = rack::math::clamp(comb_feedback_time, 0.010f, 1.f);
-		//variation
-		float variation_cv = inputs[VARIATION_CV_INPUT].getVoltage() * params[VARIATION_CV_PARAM].getValue();
-		m_params.variation = params[VARIATION_PARAM].getValue() + variation_cv;
-		//time
-		float time_cv = inputs[TIME_CV_INPUT].getVoltage() * params[TIME_CV_PARAM].getValue();
-		m_params.rt60 = rack::math::clamp(params[TIME_PARAM].getValue() + time_cv, 0.1f, 20.f);
-		//drywet
-		float dry_wet = params[DRYWET_PARAM].getValue() + (inputs[DRYWET_INPUT].getVoltage()/5);
-		m_params.dry_wet = std::max(0.0f, std::min(dry_wet, 1.0f));
-		// input
-		signal_inputs[0] = inputs[L_INPUT].getVoltage();
- 		signal_inputs[1] = inputs[R_INPUT].getVoltage();
+		
+		// input - always process
+		if (inputs[L_INPUT].isConnected()) {
+			signal_inputs[0] = inputs[L_INPUT].getVoltage();
+		} else {
+			signal_inputs[0] = 0.f;
+		}
+		
+		if (inputs[R_INPUT].isConnected()) {
+			signal_inputs[1] = inputs[R_INPUT].getVoltage();
+		} else {
+			signal_inputs[1] = 0.f;
+		}
 
-		moorer.updateParameters(m_params);
+		// Only update reverb parameters when they've changed
+		if (params_changed) {
+			moorer.updateParameters(m_params);
+			params_changed = false;
+		}
+		
+		// Process audio
 		signal_outputs = moorer.processStereo(signal_inputs);
 		
+		// Use faster clipping method
 		for(int i = 0; i < 2; i++){
-			signal_outputs[i] = signal_outputs[i] < -6.f ? -6.f : signal_outputs[i];
-			signal_outputs[i] = signal_outputs[i] > 6.f ? 6.f : signal_outputs[i];
+			if (signal_outputs[i] < -6.f) signal_outputs[i] = -6.f;
+			if (signal_outputs[i] > 6.f) signal_outputs[i] = 6.f;
 		}
 
-		outputs[L_OUTPUT].setVoltage(signal_outputs[0]);
-		outputs[R_OUTPUT].setVoltage(signal_outputs[1]);
+		// Only set output voltages if outputs are connected
+		if (outputs[L_OUTPUT].isConnected())
+			outputs[L_OUTPUT].setVoltage(signal_outputs[0]);
+		if (outputs[R_OUTPUT].isConnected())
+			outputs[R_OUTPUT].setVoltage(signal_outputs[1]);
 
-		// outputs[R_OUTPUT].setVoltage(test_out2);
-		// outputs[TEST_OUTPUT].setVoltage(test_out);
 		lights[FREEZE_LIGHT].setBrightness(m_params.freeze ? 1.f: 0.f);
+	}
+	
+	void updateParams() {
+		bool params_updated = false;
+		
+		// freeze
+		bool new_freeze = (round(params[FREEZE_PARAM].getValue()) > 0);
+		if (inputs[FREEZE_CV_INPUT].isConnected()){
+			new_freeze = (inputs[FREEZE_CV_INPUT].getVoltage() > 0);
+		}
+		
+		if (new_freeze != prev_freeze) {
+			m_params.freeze = new_freeze;
+			prev_freeze = new_freeze;
+			params_updated = true;
+		}
+		
+		//buffer size
+		float new_size = params[SIZE_PARAM].getValue();
+		if (new_size != prev_size || inputs[SIZE_CV_INPUT].isConnected()) {
+			float combTime_cv = inputs[SIZE_CV_INPUT].getVoltage() * params[SIZE_CV_PARAM].getValue() * 10.f;
+			combTime_cv = SlewLPF.process(combTime_cv);
+			float comb_feedback_time = 0.3 * pow(3.f, new_size) - 0.3;
+			comb_feedback_time += combTime_cv;
+			m_params.comb_time = rack::math::clamp(comb_feedback_time, 0.010f, 1.f);
+			prev_size = new_size;
+			params_updated = true;
+		}
+		
+		//variation
+		float new_variation = params[VARIATION_PARAM].getValue();
+		if (new_variation != prev_variation || inputs[VARIATION_CV_INPUT].isConnected()) {
+			float variation_cv = inputs[VARIATION_CV_INPUT].getVoltage() * params[VARIATION_CV_PARAM].getValue();
+			m_params.variation = new_variation + variation_cv;
+			prev_variation = new_variation;
+			params_updated = true;
+		}
+		
+		//time
+		float new_time = params[TIME_PARAM].getValue();
+		if (new_time != prev_time || inputs[TIME_CV_INPUT].isConnected()) {
+			float time_cv = inputs[TIME_CV_INPUT].getVoltage() * params[TIME_CV_PARAM].getValue();
+			m_params.rt60 = rack::math::clamp(new_time + time_cv, 0.1f, 20.f);
+			prev_time = new_time;
+			params_updated = true;
+		}
+		
+		//drywet
+		float new_drywet = params[DRYWET_PARAM].getValue();
+		if (new_drywet != prev_drywet || inputs[DRYWET_INPUT].isConnected()) {
+			float dry_wet = new_drywet;
+			if (inputs[DRYWET_INPUT].isConnected()) {
+				dry_wet += (inputs[DRYWET_INPUT].getVoltage() / 5);
+			}
+			m_params.dry_wet = rack::math::clamp(dry_wet, 0.f, 1.f);
+			prev_drywet = new_drywet;
+			params_updated = true;
+		}
+		
+		params_changed = params_updated;
 	}
 };
 

@@ -5,7 +5,7 @@ namespace buffer{
 
 	RingBuffer::RingBuffer(float max_time, float initial_delay, int _sample_rate)
 		: m_sample_rate{static_cast<float>(_sample_rate)},
-		  m_buffer{*new std::vector<float>(max_time * m_sample_rate, 0)},
+		  m_buffer{std::vector<float>(max_time * m_sample_rate, 0)},
 		  m_write{(initial_delay * m_sample_rate)},
 		  m_buffer_size{(float)(m_buffer.size() - 1)},
 		  m_time{initial_delay},
