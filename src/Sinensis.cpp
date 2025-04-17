@@ -7,8 +7,8 @@ struct Sinensis : Module {
 private:
 	noi::Filter::Biquad bpf[6]{ {"BPF"}, {"BPF"}, {"BPF"}, {"BPF"}, {"BPF"}, {"BPF"} };
 	//PARAM
-	float frequence, Q, numberOfBand, ratio;
-	float freq_cv;
+	float frequence = 440.0f, Q = 20.0f, numberOfBand = 3.0f, ratio = 1.5f;
+	float freq_cv = 0.0f;
 	dsp::ClockDivider oneInFour;
 		float debug=1000;
 

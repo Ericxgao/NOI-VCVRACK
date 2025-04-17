@@ -9,7 +9,7 @@ namespace noi {
 /// @param initial_delay in seconds
 StereoRingBuffer::StereoRingBuffer(float max_time, float initial_delay, int _sample_rate)
     : sample_rate{_sample_rate},
-m_buffers{*new std::vector<float>(max_time * (float)sample_rate, 0)},
+m_buffers{std::vector<float>(max_time * (float)sample_rate, 0)},
 m_crossfade_buffer(CROSSFADE_SIZE, 0),
 m_write{(int)(initial_delay * (float)sample_rate)},
       m_buffer_size{(int)m_buffers.size() - 1},
